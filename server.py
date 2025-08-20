@@ -1,82 +1,51 @@
+import os
 from flask import Flask
 from flask_cors import CORS
-from flask_sqlalchemy import SQLAlchemy
-import os
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from models import db
 from routes import api, env
-from apscheduler.schedulers.background import BackgroundScheduler
-import datetime
-import logging
+from jobs import save_all_users, every_24_hours, pull_campaings
 
-jobs_logger = logging.getLogger("SchedulerJobs")
-jobs_logger.setLevel(logging.INFO)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def run():
+def create_app():
     # ------------------------------------------------------------------------------------------------ #
-    """Konfigurace"""
+    """Inicializace aplikace"""
     # ------------------------------------------------------------------------------------------------ #
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
     app = Flask(__name__)  # Inicializace Flask aplikace
-    app.config["SQLALCHEMY_DATABASE_URI"] = (
-        f"sqlite:///{os.path.join(BASE_DIR, env['DATABASE_PATH'])}"
-    )
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(BASE_DIR, env['DATABASE_PATH'])}"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-    CORS(
-        app, origins=["http://localhost", "https://localhost:4200"]
-    )  # Povolení CORS pro všechny domény
+    CORS(app, origins=["http://localhost", "https://localhost:4200"])  # Povolení CORS pro všechny domény
 
-    # ------------------------------------------------------------------------------------------------ #
-    """                                           Databáze                                           """
-    # ------------------------------------------------------------------------------------------------ #
-    db.init_app(app)  # Inicializace databáze v aplikaci
+    scheduler = BackgroundScheduler(daemon=True)
 
-    # ------------------------------------------------------------------------------------------------ #
-    """                                           API cesty                                          """
-    # ------------------------------------------------------------------------------------------------ #
-    app.register_blueprint(api)  # Registrace blueprintu pro API
+    # Inicializace databáze v aplikaci
+    db.init_app(app)
 
-    with app.app_context():  # Inicializace databáze a vytvoření tabulek
+    # Registrace blueprintu pro API
+    app.register_blueprint(api)
+
+    # Inicializace databáze a vytvoření tabulek
+    with app.app_context():
         db.create_all()
+        # save_all_users()
 
-    scheduler = BackgroundScheduler(
-        {
-            "apscheduler.jobstores.default": {
-                "type": "sqlalchemy",
-                "url": "sqlite:///analytics.db",
-            },
-            "apscheduler.executors.default": {
-                "class": "apscheduler.executors.pool:ThreadPoolExecutor",
-                "max_workers": "1",
-            },
-            "apscheduler.executors.processpool": {
-                "type": "processpool",
-                "max_workers": "1",
-            },
-            "apscheduler.job_defaults.coalesce": "false",
-            "apscheduler.job_defaults.max_instances": "1",
-            "apscheduler.timezone": "UTC",
-        }
-    )
+    # scheduler.add_job(every_24_hours, "interval", args=[app], id="every_24_hours_job", replace_existing=True, minutes=1)
+
+    # scheduler.add_job(save_all_users, "interval", args=[app], id="save_all_users_job", replace_existing=True, minutes=1)
 
     scheduler.add_job(
-        func=every_24_hours,
-        trigger="interval",
-        minutes=1,
-        id="my_job_id",
-        replace_existing=True,
+        pull_campaings, "interval", args=[app], id="pull_campaings_job", replace_existing=True, seconds=10
     )
-    scheduler.start()  # Spuštění plánovače úloh
+
+    scheduler.start()
 
     return app
 
 
-def every_24_hours():
-    jobs_logger.info(f"This job runs every 24 hours {datetime.datetime.now()}")
-    print(f"This job runs every 24 hours {datetime.datetime.now()}")
-
-
 if __name__ == "__main__":  # Spuštění Flask aplikace pro vývoj
-    run().run(debug=True)
+    app = create_app()
+    app.run(debug=True)
