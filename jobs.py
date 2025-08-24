@@ -1,14 +1,14 @@
 import logging
 from requests import get
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from routes import env
-from models import Users, db, Campaigns
+from config import Config
+from models import Users, db, Campaigns, CampaignUsers
 
 jobs_logger = logging.getLogger("SchedulerJobs")
 jobs_logger.setLevel(logging.INFO)
 
-if env["DEV"]:
+if Config.DEV:
 
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
@@ -17,9 +17,9 @@ if env["DEV"]:
     jobs_logger.addHandler(handler)
 
 
-def save_all_users(app):
-    with app.app_context():
-        response = get(env["CREATORS_API_URL"] + "/api-influencers/creators/")
+def save_all_users(app_context):
+    with app_context:
+        response = get(Config.CREATORS_API_URL + "/api-influencers/creators/")
         data = response.json()
         creators = data.get("creators")
 
@@ -39,17 +39,17 @@ def save_all_users(app):
         db.session.commit()
 
 
-def pull_campaings(app):
-    with app.app_context():
+def pull_campaings(app_context):
+    with app_context:
         # Načtu všechny kampaně
-        response = get(env["CREATORS_API_URL"] + "/api-influencers/campaigns/")
+        response = get(Config.CREATORS_API_URL + "/api-influencers/campaigns/")
         data = response.json()
         campaigns = data.get("campaigns")
 
         # Pokud nejsou kampaně, tak skončím
         if len(campaigns) == 0:
             jobs_logger.info("No campaigns found.")
-            return
+            return []
 
         # Pro každou kampaň procházím a zjištuji:
         for campaign in campaigns:
@@ -58,40 +58,78 @@ def pull_campaings(app):
                 jobs_logger.info(f"Campaign {campaign.get('id')} has no start or end date, skipping.")
                 continue
 
-            now = datetime.now().date()
             start_date = datetime.strptime(campaign.get("publishing_start_date"), "%Y-%m-%d").date()
-            end_date = datetime.strptime(campaign.get("publishing_end_date"), "%Y-%m-%d").date()
+            end_date = datetime.strptime(campaign.get("publishing_end_date"), "%Y-%m-%d").date() + timedelta(days=14)
 
-            # Pokud kampaň probíhá nebo bude probíhat v budoucnu
-            if now <= end_date:
-                # zkontroluji, zda už kampaň není uložená v DB
-                if Campaigns.query.filter_by(creators_id=campaign.get("id")).one_or_none():
+            # zkontroluji, zda už kampaň není uložená v DB
+            if Campaigns.query.filter_by(creators_id=campaign.get("id")).one_or_none():
+                jobs_logger.info(f"Campaign {campaign.get('name')} ({campaign.get('id')}) already exists, skipping.")
+                continue
+
+            # Pokud ne, tak ji uložím
+            jobs_logger.info(f"Saving campaign: {campaign.get('name')} ({campaign.get('id')})")
+            db.session.add(
+                Campaigns(
+                    creators_id=campaign.get("id"),
+                    name=campaign.get("name"),
+                    hashtags=campaign.get("hashtags"),
+                    instagram_reel=campaign.get("instagram_reel", False),
+                    instagram_post=campaign.get("instagram_post", False),
+                    instagram_story=campaign.get("instagram_story", False),
+                    tiktok_video=campaign.get("tiktok_video", False),
+                    facebook_posts=campaign.get("facebook_posts", False),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            )
+
+        db.session.commit()
+
+        return campaigns
+
+
+def campaign_users(app_context, ids):
+    with app_context:
+        # Načtu všechny kampaně
+        response = get(Config.CREATORS_API_URL + "/api-influencers/involved?campaign-ids=" + str(ids))
+        data = response.json()
+        if not data or len(data) == 0:
+            jobs_logger.info(f"No data sent, skipping.")
+            return
+
+        # Projdu všechny kampaně a k nim všechny uživatele
+        for current in data:
+            campaign_id = current.get("campaign_id")
+            creator_ids = current.get("creator_ids")
+
+            for creator_id in creator_ids:
+                # Pokud už daná kombinace existuje, tak nepřidávám
+                if CampaignUsers.query.filter_by(campaign_id=campaign_id, user_id=creator_id).one_or_none():
                     jobs_logger.info(
-                        f"Campaign {campaign.get('name')} ({campaign.get('id')}) already exists, skipping."
+                        f"Record with user ID {creator_id} and campaign ID {campaign_id} already exists, skipping."
                     )
                     continue
 
-                # Pokud ne, tak ji uložím
-                jobs_logger.info(f"Saving campaign: {campaign.get('name')} ({campaign.get('id')})")
-                db.session.add(
-                    Campaigns(
-                        creators_id=campaign.get("id"),
-                        name=campaign.get("name"),
-                        hashtags=campaign.get("hashtags"),
-                        instagram_reel=campaign.get("instagram_reel", False),
-                        instagram_post=campaign.get("instagram_post", False),
-                        instagram_story=campaign.get("instagram_story", False),
-                        tiktok_video=campaign.get("tiktok_video", False),
-                        facebook_posts=campaign.get("facebook_posts", False),
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                )
-            else:
-                jobs_logger.info(f"Campaign {campaign.get('name')} ({campaign.get('id')}) already ended, skipping.")
+                # Jinak přidám
+                db.session.add(CampaignUsers(campaign_id=campaign_id, user_id=creator_id))
+                jobs_logger.info(f"Saving record with user ID {creator_id} and campaign ID {campaign_id}.")
 
         db.session.commit()
 
 
-def every_24_hours(app):
-    jobs_logger.info(f"This job runs every 24 hours {datetime.now()}")
+def every_24_hours(app_context):
+    jobs_logger.info(f"Starting job, that runs every 24 hours. Now: {datetime.now()}")
+
+    with app_context:
+        # Dělám to stejné, co na začátku při spuštění
+        campaigns = pull_campaings(app_context)
+        save_all_users(app_context)
+        ids = []
+        for campaign in campaigns:
+            ids.append(campaign.get("id"))
+
+        campaign_users(app_context, ids)
+
+        # Vyřešit metriky účtu
+
+        # Vyřešit metriky příspěvků

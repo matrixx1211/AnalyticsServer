@@ -4,8 +4,9 @@ from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from models import db
-from routes import api, env
-from jobs import save_all_users, every_24_hours, pull_campaings
+from routes import api
+from jobs import save_all_users, every_24_hours, pull_campaings, campaign_users
+from config import Config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -15,12 +16,19 @@ def create_app():
     """Inicializace aplikace"""
     # ------------------------------------------------------------------------------------------------ #
     app = Flask(__name__)  # Inicializace Flask aplikace
-    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(BASE_DIR, env['DATABASE_PATH'])}"
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(BASE_DIR, Config.DATABASE_PATH)}"
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-    CORS(app, origins=["http://localhost", "https://localhost:4200"])  # Povolení CORS pro všechny domény
-
-    scheduler = BackgroundScheduler(daemon=True)
+    # Povolení CORS pro všechny domény
+    CORS(
+        app,
+        origins=[
+            "http://localhost:4200",
+            "https://localhost:4200",
+            "https://creators.contentbox.cz",
+            "https://beautynews.loreal.cz",
+        ],
+    )
 
     # Inicializace databáze v aplikaci
     db.init_app(app)
@@ -29,19 +37,27 @@ def create_app():
     app.register_blueprint(api)
 
     # Inicializace databáze a vytvoření tabulek
-    with app.app_context():
+    flask_app_context = app.app_context()
+    with flask_app_context:
         db.create_all()
-        # save_all_users()
 
-    # scheduler.add_job(every_24_hours, "interval", args=[app], id="every_24_hours_job", replace_existing=True, minutes=1)
+    # Akce, které se provedou na začátku
+    """ campaigns = pull_campaings(flask_app_context)
+    save_all_users(flask_app_context)
+    ids = []
+    for campaign in campaigns:
+        ids.append(campaign.get("id"))
 
-    # scheduler.add_job(save_all_users, "interval", args=[app], id="save_all_users_job", replace_existing=True, minutes=1)
+    campaign_users(flask_app_context, ids)
+
+    # Inicializace plánovače
+    scheduler = BackgroundScheduler(daemon=True)
 
     scheduler.add_job(
-        pull_campaings, "interval", args=[app], id="pull_campaings_job", replace_existing=True, seconds=10
+        every_24_hours, "interval", args=[flask_app_context], id="every_24_hours_job", replace_existing=True, hours=24
     )
 
-    scheduler.start()
+    scheduler.start() """
 
     return app
 

@@ -1,7 +1,6 @@
 from typing import Optional, List
 from datetime import datetime, date
 from flask_sqlalchemy import SQLAlchemy
-from flask_sqlalchemy.model import Model
 from sqlalchemy.orm import relationship, mapped_column, Mapped
 from sqlalchemy import String, Text, Boolean, ForeignKey
 
@@ -20,12 +19,13 @@ class Users(db.Model):
     creators_email: Mapped[str] = mapped_column(String(250), unique=True)
 
     # data o facebooku, jako je uživatelské jméno a ID uživatele, které získám při přihlášení (pouze ID)
-    facebook_username: Mapped[Optional[str]] = mapped_column(String(50))
-    facebook_user_id: Mapped[Optional[str]] = mapped_column(String(100))
+    facebook_username: Mapped[Optional[str]] = mapped_column(Text)  # již nelze získat
+    facebook_user_id: Mapped[Optional[str]] = mapped_column(Text)
+    facebook_page_id: Mapped[Optional[str]] = mapped_column(Text)
 
     # data o instagramu, jako je uživatelské jméno a ID uživatele, které získám po dvou API voláních (pouze ID)
-    instagram_username: Mapped[Optional[str]] = mapped_column(String(50))
-    instagram_user_id: Mapped[Optional[str]] = mapped_column(String(100))
+    instagram_username: Mapped[Optional[str]] = mapped_column(Text)
+    instagram_user_id: Mapped[Optional[str]] = mapped_column(Text)
 
     # data o Metě, jako je token a kdy vyprší (platnost by měla být 60 dní nebo 90 dní, ale měla by se obnovovat automaticky)
     meta_token: Mapped[Optional[str]] = mapped_column(Text)
@@ -33,8 +33,8 @@ class Users(db.Model):
     meta_scopes: Mapped[Optional[str]] = mapped_column(Text)
 
     # data o TikToku, jako je uživatelské jméno, token a kdy vyprší (platnost by měla být 24 hodin, ale refresh token (slouží k získání nového access tokenu) je platný 365 dní)
-    tiktok_username: Mapped[Optional[str]] = mapped_column(String(50))
-    tiktok_user_id: Mapped[Optional[str]] = mapped_column(String(100))
+    tiktok_username: Mapped[Optional[str]] = mapped_column(Text)
+    tiktok_user_id: Mapped[Optional[str]] = mapped_column(Text)
     tiktok_token: Mapped[Optional[str]] = mapped_column(Text)
     tiktok_refresh_token: Mapped[Optional[str]] = mapped_column(Text)
     tiktok_token_expire_at: Mapped[Optional[datetime]]
@@ -42,12 +42,12 @@ class Users(db.Model):
     tiktok_scopes: Mapped[Optional[str]] = mapped_column(Text)
 
     # relace s jinými tabulkami (připojuje se k posts_data a analytics_data)
-    posts_data: Mapped[List["UsersPostsData"]] = relationship(back_populates="user", lazy=True)
-    analytics_data: Mapped[List["AnalyticsData"]] = relationship(back_populates="user", lazy=True)
+    posts_data: Mapped[Optional[List["Posts"]]] = relationship(back_populates="user", lazy=True)
+    analytics_data: Mapped[Optional[List["AnalyticsData"]]] = relationship(back_populates="user", lazy=True)
 
 
-class UsersPostsData(db.Model):
-    __tablename__ = "users_posts_data"
+class Posts(db.Model):
+    __tablename__ = "posts"
 
     # Primární klíč tabulky
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -56,7 +56,7 @@ class UsersPostsData(db.Model):
     platform_id: Mapped[int]
 
     # data o příspěvku, jako je název, popisek, datum a URL
-    title: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text)
     published_at: Mapped[datetime]
     hashtags: Mapped[Optional[str]] = mapped_column(Text)
@@ -73,7 +73,11 @@ class UsersPostsData(db.Model):
 
     # data o uživateli, který příspěvek vytvořil - relace
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    user: Mapped[Users] = relationship("Users", back_populates="posts_data")
+    user: Mapped[Users] = relationship(back_populates="posts_data")
+
+    # data o kampani, ke které příspěvek patří - relace
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
+    campaign: Mapped["Campaigns"] = relationship(back_populates="posts")
 
 
 class Campaigns(db.Model):
@@ -82,8 +86,10 @@ class Campaigns(db.Model):
     # Primární klíč tabulky
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # ID kampaně z Creators aplikace
     creators_id: Mapped[int]
 
+    # Jméno kampaně a hashtagy, které se budou hledat
     name: Mapped[str] = mapped_column(String(100))
     hashtags: Mapped[str] = mapped_column(Text)
 
@@ -94,10 +100,12 @@ class Campaigns(db.Model):
     tiktok_video: Mapped[bool] = mapped_column(Boolean, default=False)
     facebook_posts: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Časové omezení kampaně
+    # Časové omezení kampaně, kdy se budou získávat data o nich
     start_date: Mapped[Optional[date]]
     end_date: Mapped[Optional[date]]
     ended: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    posts: Mapped[Optional[List[Posts]]] = relationship(back_populates="campaign")
 
 
 class AnalyticsData(db.Model):
@@ -105,6 +113,9 @@ class AnalyticsData(db.Model):
 
     # Primární klíč tabulky
     id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Měsíc pro který analytická data jsou
+    month: Mapped[int]
 
     # analytická data z Facebook API
     facebook_total_views: Mapped[Optional[int]]
@@ -147,4 +158,15 @@ class AnalyticsData(db.Model):
 
     # Relace s uživatelem
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    user: Mapped[Users] = relationship("Users", back_populates="analytics_data")
+    user: Mapped[Users] = relationship(back_populates="analytics_data")
+
+
+class CampaignUsers(db.Model):
+    __tablename__ = "campaign_users"
+
+    # Primární klíč tabulky
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    # Cizí klíče
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))

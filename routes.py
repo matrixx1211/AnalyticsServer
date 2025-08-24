@@ -1,11 +1,11 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 from requests import post, get
-from dotenv import load_dotenv, dotenv_values
 
 from models import Users, db
+from jobs import save_all_users
+from config import Config
 
-load_dotenv()  # Inicializace dot env pro načtení proměnných prostředí
-env = dotenv_values(".env")
+from datetime import datetime, timedelta
 
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -20,43 +20,62 @@ def get_tiktok_token():
     # získání kódu z požadavku
     body = request.get_json()
 
+    # TODO: zde přidat kontrolu, že uživatel je již v DB, protože momentálně nemusím mít creators_id a to by mohl být problém, ale můžu to zároveň vyřešit při 24 jobu, kde prostě se podívám, jestli nějaký acc nemá creators_id
+    # předtím, než vůbec začnu řešit uživatele, tak si uložím všechny existující
+    # save_all_users(current_app.app_context())
+
     # poslání požadavku na TikTok API pro získání tokenu s pomocí kódu
-    tiktok_data = {
-        "code": body.get("code"),
-        "client_key": env["TIKTOK_CLIENT_KEY"],
-        "client_secret": env["TIKTOK_CLIENT_SECRET"],
-        "grant_type": "authorization_code",
-        "redirect_uri": body.get("redirect_uri"),
-    }
-    print(f"Sending data to TikTok API: {tiktok_data}")
-    tiktok_headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "*/*",
-    }
-    r = post(
-        env["TIKTOK_API_URL"] + "/oauth/token/",
-        data=tiktok_data,
-        headers=tiktok_headers,
-    )
-
-    # uložení tokenu do databáze
-    data = r.json()
-
-    if data.get("error_description"):
+    try:
+        token_request = post(
+            Config.TIKTOK_API_URL + "/oauth/token/",
+            data={
+                "code": body.get("code"),
+                "client_key": Config.TIKTOK_CLIENT_KEY,
+                "client_secret": Config.TIKTOK_CLIENT_SECRET,
+                "grant_type": "authorization_code",
+                "redirect_uri": body.get("redirect_uri"),
+            },
+        )
+    except:
         return (
             jsonify(
                 {
-                    "error": "expired_code",
-                    "original_error": data.get("error"),
-                    "original_error_description": data.get("error_description"),
+                    "error": "tiktok_token_request_failed",
+                    "error_description": "Request for tiktok access_token failed.",
                 }
             ),
             400,
         )
 
-    # Users.query.
+    # uložení tokenu do databáze
+    token = token_request.json()
 
-    return jsonify({"token": data.access_token}), 200
+    if token.get("error_description"):
+        return (
+            jsonify(
+                {
+                    "error": "expired_code",
+                    "original_error": token.get("error"),
+                    "original_error_description": token.get("error_description"),
+                }
+            ),
+            400,
+        )
+
+    update_user(
+        {
+            "creators_email": body["email"],
+            "tiktok_username": None,
+            "tiktok_user_id": token["open_id"],
+            "tiktok_token": token["access_token"],
+            "tiktok_refresh_token": token["refresh_token"],
+            "tiktok_token_expire_at": datetime.now() + timedelta(seconds=token["expires_in"]),
+            "tiktok_refresh_token_expire_at": datetime.now() + timedelta(seconds=token["refresh_expires_in"]),
+            "tiktok_scopes": body["tiktok_scopes"],
+        }
+    )
+
+    return jsonify({"token": token["access_token"]}), 200
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -69,14 +88,70 @@ def get_facebook_token():
     # získání tokenu z požadavku
     body = request.get_json()
 
-    # vytvoření uživatele včetně údajů z Facebooku
-    create_user_if_not_exists(
-        email=body.get("email"),
-        meta_token=body.get("token"),
-        meta_expires_at=body.get("expires_in"),
-    )
+    # TODO: stejně jako u tiktoku viz. výš
+    # předtím, než vůbec začnu řešit uživatele, tak si uložím všechny existující
+    # save_all_users(current_app.app_context())
 
-    return jsonify({"token": body.get("token")}), 200
+    # najití ostatních META (FB/IG) údajů a jejich příprava uložení
+    # /facebook_user_id/accounts/?access_token=meta_token
+    try:
+        page_id_request = get(
+            f"{Config.META_API_URL}/{body.get("facebook_user_id")}/accounts/?access_token={body.get("meta_token")}"
+        )
+        data_page_id = page_id_request.json()
+    except:
+        return (
+            jsonify(
+                {
+                    "error": "page_id_request_failed",
+                    "error_description": "Request for page_id failed.",
+                }
+            ),
+            400,
+        )
+
+    # FIXME: zde získávám page_id, kde podle všeho může být víc, jak jedna, protože vrací pole, takže možný budoucí problém
+    # /page_id[0].id?fields=instagram_business_account&access_token=meta_token
+    try:
+        ig_user_id_request = get(
+            f"{Config.META_API_URL}/{data_page_id['data'][0]['id']}/?fields=instagram_business_account,username&access_token={body.get('meta_token')}"
+        )
+        ig_user_id_data = ig_user_id_request.json()
+    except:
+        return (
+            jsonify(
+                {
+                    "error": "page_id_doesnt_exist",
+                    "error_description": "This facebook account probably doesn't have page_id.",
+                }
+            ),
+            400,
+        )
+
+    # Aktualizace uživatele včetně údajů z Facebooku
+    if not update_user(
+        {
+            "creators_email": body.get("email"),
+            "meta_token": body.get("meta_token"),
+            "meta_token_expire_at": datetime.now() + timedelta(seconds=body.get("meta_expires_in")),
+            "meta_scopes": body.get("meta_scopes"),
+            "facebook_user_id": body.get("facebook_user_id"),
+            "facebook_page_id": data_page_id["data"][0]["id"],
+            "instagram_username": ig_user_id_data["username"],
+            "instagram_user_id": ig_user_id_data["instagram_business_account"]["id"],
+        }
+    ):
+        return (
+            jsonify(
+                {
+                    "error": "user_not_exist",
+                    "error_description": f"The user with this email address {body.get("email")} does not exist.",
+                }
+            ),
+            400,
+        )
+
+    return jsonify({"token": body.get("meta_token")}), 200
 
 
 @api.route("/user/<username>", methods=["GET"])
@@ -91,13 +166,36 @@ def get_user_data(username):
 
 # ------------------------------------------------------------------------------------------------ #
 """ UTILS """
-
-
 # ------------------------------------------------------------------------------------------------ #
-def create_user_if_not_exists(email, meta_token=None, meta_expires_at=None):
-    user = Users.query.filter_by(creators_email=email).first()
 
-    if not user:
-        user = Users(creators_email=email)
-        db.session.add(user)
-        db.session.commit()
+
+@api.route("/test", methods=["POST"])
+def test():
+    body = request.get_json()
+    print(body)
+    print(body.items())
+
+    save_all_users(current_app.app_context())
+
+    return jsonify({"status": "ok", "body": {key: value for key, value in body.items() if value is not None}}), 200
+
+
+def update_user(data):
+    # Uživatel, kde email je zadaný email
+    user = Users.query.filter_by(creators_email=data["creators_email"])
+
+    # Pokud není uživatel, tak by měl být
+    if not user.one_or_none():
+        return False
+
+    # Pokud je uživatel, tak ho aktualizuji
+    user.update(values={key: value for key, value in data.items() if value is not None})
+    db.session.commit()
+
+    return True
+
+
+def get_metrics(email):
+    user = Users.query.filter_by(creators_email=email)
+    get_instagram_metrics()
+    get_tiktok_metrics()
