@@ -45,6 +45,9 @@ class Users(db.Model):
     posts_data: Mapped[Optional[List["Posts"]]] = relationship(back_populates="user", lazy=True)
     analytics_data: Mapped[Optional[List["AnalyticsData"]]] = relationship(back_populates="user", lazy=True)
 
+    def to_dict(self):
+        return {"creators_id": self.creators_id, "creators_email": self.creators_email}
+
 
 class Posts(db.Model):
     __tablename__ = "posts"
@@ -52,24 +55,29 @@ class Posts(db.Model):
     # Primární klíč tabulky
     id: Mapped[int] = mapped_column(primary_key=True)
 
+    # ID příspěvku na dané platformě
+    platform_id: Mapped[str] = mapped_column(String(100))
+
     # data ohledně toho, odkud je příspěvek
-    platform_id: Mapped[int]
+    platform_type_id: Mapped[int]
+    # TODO: možná by nebylo od věci zde přidat typ, ale asi bude stačit platform_type_id
 
     # data o příspěvku, jako je název, popisek, datum a URL
-    title: Mapped[str] = mapped_column(Text)
-    description: Mapped[str] = mapped_column(Text)
+    title: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
     published_at: Mapped[datetime]
     hashtags: Mapped[Optional[str]] = mapped_column(Text)
 
-    media_url: Mapped[str] = mapped_column(Text)
-    thumbnail_url: Mapped[str] = mapped_column(Text)
+    media_url: Mapped[Optional[str]] = mapped_column(Text)
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(Text)
 
     # analytická data o příspěvku
-    views: Mapped[int]
-    likes: Mapped[int]
-    comments: Mapped[int]
+    views: Mapped[Optional[int]]
+    likes: Mapped[Optional[int]]
+    shares: Mapped[Optional[int]]
+    comments: Mapped[Optional[int]]
 
-    engagement_rate: Mapped[float]  # TODO: výpočet z likes + comments + shares / views * 100 [%]
+    engagement_rate: Mapped[Optional[float]]  # TODO: výpočet z likes + comments + shares / views * 100 [%]
 
     # data o uživateli, který příspěvek vytvořil - relace
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
@@ -78,6 +86,26 @@ class Posts(db.Model):
     # data o kampani, ke které příspěvek patří - relace
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"))
     campaign: Mapped["Campaigns"] = relationship(back_populates="posts")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            # "platform_id": self.platform_id,
+            "platform_type_id": self.platform_type_id,
+            # "title": self.title,
+            # "description": self.description,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            # "hashtags": self.hashtags,
+            "media_url": self.media_url,
+            "thumbnail_url": self.thumbnail_url,
+            "views": self.views,
+            "likes": self.likes,
+            "comments": self.comments,
+            "engagement_rate": self.engagement_rate,
+            # "user_id": self.user_id,
+            # "campaign_id": self.campaign_id,
+            "user": self.user.to_dict() if self.user else None,
+        }
 
 
 class Campaigns(db.Model):
@@ -98,7 +126,7 @@ class Campaigns(db.Model):
     instagram_post: Mapped[bool] = mapped_column(Boolean, default=False)
     instagram_story: Mapped[bool] = mapped_column(Boolean, default=False)
     tiktok_video: Mapped[bool] = mapped_column(Boolean, default=False)
-    facebook_posts: Mapped[bool] = mapped_column(Boolean, default=False)
+    facebook_post: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Časové omezení kampaně, kdy se budou získávat data o nich
     start_date: Mapped[Optional[date]]

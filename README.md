@@ -44,3 +44,5 @@ Z CALLU:
 
 Zajímají mě data z kampaní jen od začátku publishing, takže už znám ty uživatele - involved v kampani
 end publishing + 14 dnů budu řešit, pak campaing -> ended = true
+
+<!-- TODO: Dobrá věc je to, že nevím jaká je timezone na serveru, takže časy bude potřeba zkontrolovat -->

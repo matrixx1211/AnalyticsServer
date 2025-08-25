@@ -1,11 +1,11 @@
 from flask import Blueprint, jsonify, request, current_app
 from requests import post, get
 
-from models import Users, db
-from jobs import save_all_users
+from models import Users, Posts, Campaigns
 from config import Config
 
 from datetime import datetime, timedelta
+from utils import update_user, save_all_users
 
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -154,48 +154,113 @@ def get_facebook_token():
     return jsonify({"token": body.get("meta_token")}), 200
 
 
+# ------------------------------------------------------------------------------------------------ #
+""" OWN API - RESPONSE FOR CREATORS APP  """
+# ------------------------------------------------------------------------------------------------ #
+
+
+@api.route("/user/valid", methods=["get"])
+def get_is_user_valid():
+    creators_id = request.args.get("id")
+    creators_email = request.args.get("email")
+
+    if not creators_id or not creators_email:
+        return (
+            jsonify(
+                {
+                    "error": "id_or_email_not_entered",
+                    "error_description": f"Some required query params not entered, require email {creators_email} and id {creators_id}.",
+                }
+            ),
+            400,
+        )
+
+    user_query = Users.query.filter_by(creators_id=creators_id, creators_email=creators_email)
+    user = user_query.first()
+
+    if not user:
+        return jsonify({"error": "user_not_found", "error_description": f"This user doesn't exist."}), 404
+
+    return jsonify(
+        {
+            "data": {
+                "tiktok_valid": user.tiktok_refresh_token_expire_at > datetime.now(),
+                "meta_valid": user.meta_token_expire_at > datetime.now(),
+            }
+        }
+    )
+
+
+@api.route("/metrics/post", methods=["get"])
+def get_post_metrics():
+    # získání ID kampaně
+    creators_campaign_id = request.args.get("campaign_id", type=int)
+
+    # oveření zda ID kampaně bylo zadáno
+    if creators_campaign_id == None:
+        return (
+            jsonify(
+                {
+                    "error": "campaign_id_not_entered",
+                    "error_description": "Required query parameter campaign_id not entered.",
+                }
+            ),
+            400,
+        )
+
+    # kontrola zda vůbec taková kampaň existuje
+    campaign = Campaigns.query.filter_by(creators_id=creators_campaign_id).first()
+    if campaign == None:
+        return (
+            jsonify(
+                {
+                    "error": "no_campaign_with_campaign_id",
+                    "error_description": f"There is no campaign with campaign_id {creators_campaign_id}.",
+                }
+            ),
+            404,
+        )
+
+    # získání lokální ID kampaně
+    campaign_id = campaign.id
+
+    # pokud je ID kampaně, tak vyhledám informace o kampani a vrátím je
+    posts_query = Posts.query.filter_by(campaign_id=campaign_id)
+
+    # pokud není žádná taková kampaň
+    if posts_query.count() == 0:
+        return (
+            jsonify(
+                {
+                    "error": "no_posts_with_campaign_id",
+                    "error_description": f"There are no posts with campaign_id {campaign_id}.",
+                }
+            ),
+            404,
+        )
+
+    posts = posts_query.all()
+
+    return jsonify({"creators_campaign_id": creators_campaign_id, "posts": [post.to_dict() for post in posts]}), 200
+
+
+@api.route("/metrics/profile", methods=["get"])
+def get_profile_metrics():
+    # jeden z nich pouze stačí, ideálně oba pro bezpečnost
+    user_id = request.args.get("id")
+    user_email = request.args.get("email")
+
+    return jsonify({"s": "ok"}), 200
+
+
+""" 
+# TODO: zatím pouze prototyp
 @api.route("/user/<username>", methods=["GET"])
 def get_user_data(username):
-    """Získání dat uživatele podle uživatelského jména."""
+    # Získání dat uživatele podle uživatelského jména.
     user = Users.query.filter_by(username=username).first()
     if user:
         return {"id": user.id, "username": user.username}, 200
     else:
-        return {"error": "User not found"}, 404
-
-
-# ------------------------------------------------------------------------------------------------ #
-""" UTILS """
-# ------------------------------------------------------------------------------------------------ #
-
-
-@api.route("/test", methods=["POST"])
-def test():
-    body = request.get_json()
-    print(body)
-    print(body.items())
-
-    save_all_users(current_app.app_context())
-
-    return jsonify({"status": "ok", "body": {key: value for key, value in body.items() if value is not None}}), 200
-
-
-def update_user(data):
-    # Uživatel, kde email je zadaný email
-    user = Users.query.filter_by(creators_email=data["creators_email"])
-
-    # Pokud není uživatel, tak by měl být
-    if not user.one_or_none():
-        return False
-
-    # Pokud je uživatel, tak ho aktualizuji
-    user.update(values={key: value for key, value in data.items() if value is not None})
-    db.session.commit()
-
-    return True
-
-
-def get_metrics(email):
-    user = Users.query.filter_by(creators_email=email)
-    get_instagram_metrics()
-    get_tiktok_metrics()
+        return {"error": "User not found"}, 404 
+"""

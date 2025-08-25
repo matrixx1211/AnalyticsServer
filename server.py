@@ -5,7 +5,8 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from models import db
 from routes import api
-from jobs import save_all_users, every_24_hours, pull_campaings, campaign_users
+from jobs import every_24_hours
+from utils import startup_actions, get_posts_metrics
 from config import Config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -42,13 +43,9 @@ def create_app():
         db.create_all()
 
     # Akce, které se provedou na začátku
-    """ campaigns = pull_campaings(flask_app_context)
-    save_all_users(flask_app_context)
-    ids = []
-    for campaign in campaigns:
-        ids.append(campaign.get("id"))
-
-    campaign_users(flask_app_context, ids)
+    # """ TODO: ODKOMENTOVAT """
+    startup_actions(flask_app_context)
+    # get_posts_metrics(flask_app_context)
 
     # Inicializace plánovače
     scheduler = BackgroundScheduler(daemon=True)
@@ -57,7 +54,7 @@ def create_app():
         every_24_hours, "interval", args=[flask_app_context], id="every_24_hours_job", replace_existing=True, hours=24
     )
 
-    scheduler.start() """
+    scheduler.start()
 
     return app
 
