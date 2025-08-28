@@ -1,11 +1,11 @@
 from flask import Blueprint, jsonify, request, current_app
 from requests import post, get
 
-from models import Users, Posts, Campaigns
+from models import Users, Posts, Campaigns, AnalyticsData
 from config import Config
 
 from datetime import datetime, timedelta
-from utils import update_user, save_all_users
+from utils import update_user, save_all_users, get_posts_metrics
 
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -96,7 +96,7 @@ def get_facebook_token():
     # /facebook_user_id/accounts/?access_token=meta_token
     try:
         page_id_request = get(
-            f"{Config.META_API_URL}/{body.get("facebook_user_id")}/accounts/?access_token={body.get("meta_token")}"
+            f"{Config.META_API_URL}/{body.get('facebook_user_id')}/accounts/?access_token={body.get('meta_token')}"
         )
         data_page_id = page_id_request.json()
     except:
@@ -145,7 +145,7 @@ def get_facebook_token():
             jsonify(
                 {
                     "error": "user_not_exist",
-                    "error_description": f"The user with this email address {body.get("email")} does not exist.",
+                    "error_description": f"The user with this email address {body.get('email')} does not exist.",
                 }
             ),
             400,
@@ -159,7 +159,7 @@ def get_facebook_token():
 # ------------------------------------------------------------------------------------------------ #
 
 
-@api.route("/user/valid", methods=["get"])
+@api.route("/user/valid", methods=["GET"])
 def get_is_user_valid():
     creators_id = request.args.get("id")
     creators_email = request.args.get("email")
@@ -169,7 +169,7 @@ def get_is_user_valid():
             jsonify(
                 {
                     "error": "id_or_email_not_entered",
-                    "error_description": f"Some required query params not entered, require email {creators_email} and id {creators_id}.",
+                    "error_description": f"Some required query params not entered, require email {creators_email} and id {creators_id}. Both are required because of how is ",
                 }
             ),
             400,
@@ -184,14 +184,20 @@ def get_is_user_valid():
     return jsonify(
         {
             "data": {
-                "tiktok_valid": user.tiktok_refresh_token_expire_at > datetime.now(),
-                "meta_valid": user.meta_token_expire_at > datetime.now(),
+                "tiktok_valid": (
+                    user.tiktok_refresh_token_expire_at > datetime.now()
+                    if user.tiktok_refresh_token_expire_at is not None
+                    else False
+                ),
+                "meta_valid": (
+                    user.meta_token_expire_at > datetime.now() if user.meta_token_expire_at is not None else False
+                ),
             }
         }
     )
 
 
-@api.route("/metrics/post", methods=["get"])
+@api.route("/metrics/post", methods=["GET"])
 def get_post_metrics():
     # získání ID kampaně
     creators_campaign_id = request.args.get("campaign_id", type=int)
@@ -227,40 +233,106 @@ def get_post_metrics():
     # pokud je ID kampaně, tak vyhledám informace o kampani a vrátím je
     posts_query = Posts.query.filter_by(campaign_id=campaign_id)
 
-    # pokud není žádná taková kampaň
-    if posts_query.count() == 0:
-        return (
-            jsonify(
-                {
-                    "error": "no_posts_with_campaign_id",
-                    "error_description": f"There are no posts with campaign_id {campaign_id}.",
-                }
-            ),
-            404,
-        )
-
     posts = posts_query.all()
 
     return jsonify({"creators_campaign_id": creators_campaign_id, "posts": [post.to_dict() for post in posts]}), 200
 
 
-@api.route("/metrics/profile", methods=["get"])
+@api.route("/metrics/profile", methods=["GET"])
 def get_profile_metrics():
     # jeden z nich pouze stačí, ideálně oba pro bezpečnost
     user_id = request.args.get("id")
-    user_email = request.args.get("email")
 
-    return jsonify({"s": "ok"}), 200
+    if user_id is None:
+        return (
+            jsonify(
+                {
+                    "error": "user_id_not_entered",
+                    "error_description": "No user_id entered. You need to enter valid user_id.",
+                }
+            ),
+            400,
+        )
+
+    user = Users.query.filter_by(creators_id=user_id).first()
+
+    if user is None:
+        return (
+            jsonify(
+                {
+                    "error": "user_with_user_id_doesnt_exist",
+                    "error_description": f"User with user_id {user_id} does not exist.",
+                }
+            ),
+            400,
+        )
+
+    analytics_data = AnalyticsData.query.filter_by(user_id=user.id, month=datetime.now().month).first()
+
+    # TODO: místo else {} možná by nebylo od věci raději zavolat funkci, které se pokusí ty data získat
+    return jsonify({"data": {"analytics": analytics_data.to_dict() if analytics_data is not None else {}}}), 200
 
 
-""" 
-# TODO: zatím pouze prototyp
-@api.route("/user/<username>", methods=["GET"])
-def get_user_data(username):
-    # Získání dat uživatele podle uživatelského jména.
-    user = Users.query.filter_by(username=username).first()
-    if user:
-        return {"id": user.id, "username": user.username}, 200
-    else:
-        return {"error": "User not found"}, 404 
-"""
+@api.route("/metrics/posts/refresh/all", methods=["GET"])
+def force_update_posts_metrics():
+    start = datetime.now()
+    get_posts_metrics(current_app.app_context())
+    end = datetime.now()
+
+    return jsonify({"refresh": {"started_at": start, "ended_at": end}}), 200
+
+
+# TODO: zde ještě 1x /metrics/posts/refresh?user_id ...
+
+
+# ------------------------------------------------------------------------------------------------ #
+""" DEV ONLY API """
+# ------------------------------------------------------------------------------------------------ #
+dev = Blueprint("dev", __name__, url_prefix="/dev")
+
+
+@dev.route("/users", methods=["GET"])
+def get_all_users_in_db():
+    password = request.args.get("password")
+    if password is None:
+        return jsonify({"error": "password_not_entered"})
+
+    if password != "t3st@s3rvEr!":
+        return jsonify({"error": "no_match_for_password"})
+
+    all_users = Users.query.all()
+
+    return jsonify({"data": {"users": [user.dev_to_dict() for user in all_users]}}), 200
+
+
+@dev.route("/posts", methods=["GET"])
+def get_all_posts_in_db():
+    password = request.args.get("password")
+    if password is None:
+        return jsonify({"error": "password_not_entered"})
+
+    if password != "t3st@s3rvEr!":
+        return jsonify({"error": "no_match_for_password"})
+
+    all_posts = Posts.query.all()
+
+    return jsonify({"data": {"posts": [post.dev_to_dict() for post in all_posts]}}), 200
+
+
+@dev.route("/campaigns", methods=["GET"])
+def get_all_campaigns_in_db():
+    password = request.args.get("password")
+    if password is None:
+        return jsonify({"error": "password_not_entered"})
+
+    if password != "t3st@s3rvEr!":
+        return jsonify({"error": "no_match_for_password"})
+
+    all_campaigns = Campaigns.query.all()
+
+    return jsonify({"data": {"campaigns": [campaign.dev_to_dict() for campaign in all_campaigns]}}), 200
+
+
+@dev.route("/now", methods=["GET"])
+def get_now():
+    return jsonify({"now": datetime.now()}), 200

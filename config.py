@@ -1,21 +1,53 @@
-from dotenv import load_dotenv, dotenv_values
+from os import getenv, path
 
-load_dotenv()  # Inicializace dot env pro načtení proměnných prostředí
-env = dotenv_values(".env")
+# načti .env ze stejného adresáře
+BASE_DIR = path.dirname(__file__)
+
+
+def env_bool(key: str, default: bool = False) -> bool:
+    val = getenv(key, str(int(default)))
+    return str(val).lower() in ("1", "true", "yes", "y", "on")
+
+
+def env_list(key: str, default: list = None) -> list:
+    val = getenv(key)
+    if val:
+        return [item.strip() for item in val.split(",")]
+    return default if default is not None else []
 
 
 class Config:
-    DEV = env["DEV"]
+    # běhové režimy a cesty
+    DEV = env_bool("DEV", False)
+    DATABASE_PATH = getenv("DATABASE_PATH", "analytics.db")
 
-    DATABASE_PATH = env["DATABASE_PATH"]
+    # externí API – defaulty, ať to nespadne při importu
+    CREATORS_API_URL = getenv("CREATORS_API_URL", "https://creators.contentbox.cz/api").rstrip("/")
+    META_API_URL = getenv("META_API_URL", "https://graph.facebook.com/v23.0").rstrip("/")
+    TIKTOK_API_URL = getenv("TIKTOK_API_URL", "https://open.tiktokapis.com/v2").rstrip("/")
 
-    TIKTOK_ORGANIZATION_ID = env["TIKTOK_ORGANIZATION_ID"]
-    TIKTOK_CLIENT_KEY = env["TIKTOK_CLIENT_KEY"]
-    TIKTOK_CLIENT_SECRET = env["TIKTOK_CLIENT_SECRET"]
-    TIKTOK_API_URL = env["TIKTOK_API_URL"]
+    TIKTOK_CLIENT_KEY = getenv("TIKTOK_CLIENT_KEY", "")
+    TIKTOK_CLIENT_SECRET = getenv("TIKTOK_CLIENT_SECRET", "")
 
-    META_APP_ID = env["META_APP_ID"]
-    META_APP_SECRET = env["META_APP_SECRET"]
-    META_API_URL = env["META_API_URL"]
+    CORS = env_list("CORS", ["https://creators.contentbox.cz", "https://beautynews.loreal.cz"])
 
-    CREATORS_API_URL = env["CREATORS_API_URL"]
+    def __str__(self):
+        return f"""
+    CONFIGURATION:
+            
+        - DEV: {self.DEV}
+
+        - DATABASE_PATH: {self.DATABASE_PATH}
+
+        - CREATORS_API_URL: {self.CREATORS_API_URL}
+        - META_API_URL: {self.META_API_URL}
+        - TIKTOK_API_URL: {self.TIKTOK_API_URL}
+
+        - TIKTOK_CLIENT_KEY: {self.TIKTOK_CLIENT_KEY}
+        - TIKTOK_CLIENT_SECRET: {self.TIKTOK_CLIENT_SECRET}
+        
+        - CORS: {self.CORS}
+        """
+
+    def __repr__(self):
+        return self.__str__()

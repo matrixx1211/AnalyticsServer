@@ -10,12 +10,12 @@ from dateutil import parser
 utils_logger = logging.getLogger("Utils")
 utils_logger.setLevel(logging.INFO)
 
-if Config.DEV:
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.INFO)
-    handler.setFormatter(logging.Formatter("%(asctime)s:%(levelname)s - %(message)s"))
-
-    utils_logger.addHandler(handler)
+# if Config.DEV:
+#     handler = logging.StreamHandler()
+#     handler.setLevel(logging.INFO)
+#     handler.setFormatter(logging.Formatter("%(asctime)s:%(levelname)s - %(message)s"))
+#
+#     utils_logger.addHandler(handler)
 
 
 def save_all_users(app_context):
@@ -71,17 +71,16 @@ def pull_campaings(app_context):
             platforms = {"igp": False, "igs": False, "igr": False, "ttv": False, "fbp": False}
             for platform in campaign["platforms"]:
                 platform_id = platform["id"]
-                match platform_id:
-                    case 1:
-                        platforms["igp"] = True
-                    case 2:
-                        platforms["igs"] = True
-                    case 3:
-                        platforms["igr"] = True
-                    case 4:
-                        platforms["ttv"] = True
-                    case _:
-                        platforms["fbp"] = True
+                if platform_id == 1:
+                    platforms["igp"] = True
+                elif platform_id == 2:
+                    platforms["igs"] = True
+                elif platform_id == 3:
+                    platforms["igr"] = True
+                elif platform_id == 4:
+                    platforms["ttv"] = True
+                else:
+                    platforms["fbp"] = True
 
             # zkontroluji, zda už kampaň není uložená v DB, pokud je, tak upravím pouze data
             current_campaign = Campaigns.query.filter_by(creators_id=campaign["id"])
@@ -168,11 +167,17 @@ def update_user(data):
     return True
 
 
-def get_profile_metrics(email):
+def get_profile_metrics(app_context):
     # získání metrik pro uživatele a následně je uložím do DB
-    user = Users.query.filter_by(creators_email=email)
+    """with app_context:
+    users = Users.query.filter(or_(Users.meta_token != None, Users.tiktok_token != None)).all()
+
+    for user in users:
+        if user.meta_token:"""
+
     # get_instagram_metrics()
     # get_tiktok_metrics()
+    return []
 
 
 def get_posts_metrics(app_context):
@@ -199,78 +204,84 @@ def get_posts_metrics(app_context):
             for campaign_user in campaign_users:
                 user_query = Users.query.filter_by(id=campaign_user.user_id)
                 user = user_query.first()
+                user_dict = user.to_dict()
 
                 # získání dat z IG
                 if campaign.instagram_reel or campaign.instagram_post:
-                    # získání dat o IG reels a IG posts
-                    # {{baseFBURL}}/v23.0/ig_user_id?fields=business_discovery.username(ig_username){followers_count,media_count,media{like_count,comments_count,permalink,thumbnail_url,timestamp,view_count}}&access_token=token
-                    instagram_content_request = get(
-                        f"{Config.META_API_URL}/{user.instagram_user_id}/?fields=business_discovery.username({user.instagram_username}){{followers_count,media_count,media{{like_count,comments_count,permalink,thumbnail_url,timestamp,view_count,media_product_type,caption}}}}&access_token={user.meta_token}"
-                    )
+                    if (
+                        user_dict.get("instagram_user_id", None) is not None
+                        and user_dict.get("instagram_user", None) is not None
+                        and user_dict.get("meta_token", None) is not None
+                    ):
+                        # získání dat o IG reels a IG posts
+                        # {{baseFBURL}}/v23.0/ig_user_id?fields=business_discovery.username(ig_username){followers_count,media_count,media{like_count,comments_count,permalink,thumbnail_url,timestamp,view_count}}&access_token=token
+                        instagram_content_request = get(
+                            f"{Config.META_API_URL}/{user.instagram_user_id}/?fields=business_discovery.username({user.instagram_username}){{followers_count,media_count,media{{like_count,comments_count,permalink,thumbnail_url,timestamp,view_count,media_product_type,caption}}}}&access_token={user.meta_token}"
+                        )
 
-                    instagram_content = instagram_content_request.json()["business_discovery"]["media"]["data"]
-                    if len(instagram_content) > 0:
-                        for instagram_post in instagram_content:
-                            # kontrola, jestli náhodou příspěvek již neexistuje
-                            post_query = Posts.query.filter_by(platform_id=instagram_post.get("id"))
+                        instagram_content = instagram_content_request.json()["business_discovery"]["media"]["data"]
+                        if len(instagram_content) > 0:
+                            for instagram_post in instagram_content:
+                                # kontrola, jestli náhodou příspěvek již neexistuje
+                                post_query = Posts.query.filter_by(platform_id=instagram_post.get("id"))
 
-                            # pokud již existuje, tak pouze aktualizuji data
-                            if post_query.one_or_none():
-                                post_query.update(
-                                    {
-                                        "views": instagram_post.get("view_count", None),
-                                        "likes": instagram_post.get("like_count", None),
-                                        "comments": instagram_post.get("comments_count", None),
-                                        "engagement_rate": (
-                                            0
-                                            if instagram_post.get("view_count", None) == 0
-                                            or instagram_post.get("view_count", None) == None
-                                            else (
-                                                (
-                                                    instagram_post.get("like_count", None)
-                                                    + instagram_post.get("comments_count", None)
+                                # pokud již existuje, tak pouze aktualizuji data
+                                if post_query.one_or_none():
+                                    post_query.update(
+                                        {
+                                            "views": instagram_post.get("view_count", None),
+                                            "likes": instagram_post.get("like_count", None),
+                                            "comments": instagram_post.get("comments_count", None),
+                                            "engagement_rate": (
+                                                0
+                                                if instagram_post.get("view_count", None) == 0
+                                                or instagram_post.get("view_count", None) is None
+                                                else (
+                                                    (
+                                                        instagram_post.get("like_count", None)
+                                                        + instagram_post.get("comments_count", None)
+                                                    )
+                                                    / instagram_post.get("view_count", None)
+                                                    * 100
                                                 )
-                                                / instagram_post.get("view_count", None)
-                                                * 100
-                                            )
-                                        ),
-                                    }
-                                )
-                                continue
-
-                            # IG post = 1, IG story = 2, IG reel = 3, TT video = 4, FB post = _ (nevím)
-                            post_hashtags = set(re.findall(r"#(\w+)", instagram_post.get("caption")))
-                            campaign_hashtags = set(campaign.hashtags.split(","))
-
-                            if post_hashtags == campaign_hashtags:
-                                platform_type_id = 1 if instagram_post["media_product_type"] == "FEED" else 3
-                                db.session.add(
-                                    Posts(
-                                        platform_id=instagram_post.get("id"),
-                                        platform_type_id=platform_type_id,
-                                        published_at=parser.parse(instagram_post.get("timestamp", None)),
-                                        media_url=instagram_post.get("permalink", None),
-                                        thumbnail_url=instagram_post.get("thumbnail_url", None),
-                                        views=instagram_post.get("view_count", None),
-                                        likes=instagram_post.get("like_count", None),
-                                        comments=instagram_post.get("comments_count", None),
-                                        engagement_rate=(
-                                            0
-                                            if instagram_post.get("view_count", None) == 0
-                                            or instagram_post.get("view_count", None) == None
-                                            else (
-                                                (
-                                                    instagram_post.get("like_count", None)
-                                                    + instagram_post.get("comments_count", None)
-                                                )
-                                                / instagram_post.get("view_count", None)
-                                                * 100
-                                            )
-                                        ),
-                                        user_id=user.id,
-                                        campaign_id=campaign.id,
+                                            ),
+                                        }
                                     )
-                                )
+                                    continue
+
+                                # IG post = 1, IG story = 2, IG reel = 3, TT video = 4, FB post = _ (nevím)
+                                post_hashtags = set(re.findall(r"#(\w+)", instagram_post.get("caption")))
+                                campaign_hashtags = set(campaign.hashtags.split(","))
+
+                                if post_hashtags == campaign_hashtags:
+                                    platform_type_id = 1 if instagram_post["media_product_type"] == "FEED" else 3
+                                    db.session.add(
+                                        Posts(
+                                            platform_id=instagram_post.get("id"),
+                                            platform_type_id=platform_type_id,
+                                            published_at=parser.parse(instagram_post.get("timestamp", None)),
+                                            media_url=instagram_post.get("permalink", None),
+                                            thumbnail_url=instagram_post.get("thumbnail_url", None),
+                                            views=instagram_post.get("view_count", None),
+                                            likes=instagram_post.get("like_count", None),
+                                            comments=instagram_post.get("comments_count", None),
+                                            engagement_rate=(
+                                                0
+                                                if instagram_post.get("view_count", None) == 0
+                                                or instagram_post.get("view_count", None) is None
+                                                else (
+                                                    (
+                                                        instagram_post.get("like_count", None)
+                                                        + instagram_post.get("comments_count", None)
+                                                    )
+                                                    / instagram_post.get("view_count", None)
+                                                    * 100
+                                                )
+                                            ),
+                                            user_id=user.id,
+                                            campaign_id=campaign.id,
+                                        )
+                                    )
 
                 # získání dat o IG story
                 # {{baseFBURL}}/ig_user_id/stories?access_token=token&fields=id,permalink,media_type,timestamp,thumbnail_url,like_count,comments_count
@@ -279,7 +290,8 @@ def get_posts_metrics(app_context):
                         f"{Config.META_API_URL}/{user.instagram_user_id}/stories?fields=fields=id,permalink,media_type,timestamp,thumbnail_url,like_count,comments_count&access_token={user.meta_token}"
                     )
 
-                    instagram_stories = instagram_stories_request.json()['data']
+                    instagram_stories = instagram_stories_request.json()["data"]
+                    print(instagram_stories)
                     if len(instagram_stories) > 0:
                         for instagram_story in instagram_stories:
                             # kontrola, jestli náhodou příspěvek již neexistuje
@@ -341,101 +353,118 @@ def get_posts_metrics(app_context):
  """
 
                 if campaign.tiktok_video:
-                    # získání dat o TT video
-                    # https://open.tiktokapis.com/v2/video/list/?fields=id,create_time,video_description,view_count,title
-                    # TODO : refresh token může taky vypršet a pak musím někde odvalidovat
-                    if user.tiktok_token_expire_at <= datetime.now():
-                        tiktok_refresh = post(
-                            f"{Config.TIKTOK_API_URL}/oauth/token/",
-                            data={
-                                "client_key": Config.TIKTOK_CLIENT_KEY,
-                                "client_secret": Config.TIKTOK_CLIENT_SECRET,
-                                "grant_type": "refresh_token",
-                                "refresh_token": user.tiktok_refresh_token,
-                            },
-                        ).json()
-                        user_query.update(
-                            {
-                                "tiktok_token": tiktok_refresh.get("access_token"),
-                                "tiktok_refresh_token": tiktok_refresh.get("refresh_token"),
-                                "tiktok_token_expire_at": datetime.now()
-                                + timedelta(seconds=tiktok_refresh.get("expires_in")),
-                                "tiktok_refresh_token_expire_at": datetime.now()
-                                + timedelta(seconds=tiktok_refresh.get("refresh_expires_in")),
-                            }
+                    if (
+                        user_dict.get("tiktok_token_expire_at", None) is not None
+                        and user_dict.get("tiktok_token", None) is not None
+                    ):
+                        # získání dat o TT video
+                        # https://open.tiktokapis.com/v2/video/list/?fields=id,create_time,video_description,view_count,title
+                        # TODO : refresh token může taky vypršet a pak musím někde odvalidovat
+                        if user.tiktok_token_expire_at and user.tiktok_token_expire_at <= datetime.now():
+                            tiktok_refresh = post(
+                                f"{Config.TIKTOK_API_URL}/oauth/token/",
+                                data={
+                                    "client_key": Config.TIKTOK_CLIENT_KEY,
+                                    "client_secret": Config.TIKTOK_CLIENT_SECRET,
+                                    "grant_type": "refresh_token",
+                                    "refresh_token": user.tiktok_refresh_token,
+                                },
+                            ).json()
+
+                            user_query.update(
+                                {
+                                    "tiktok_token": tiktok_refresh.get("access_token"),
+                                    "tiktok_refresh_token": tiktok_refresh.get("refresh_token"),
+                                    "tiktok_token_expire_at": datetime.now()
+                                    + timedelta(
+                                        seconds=(
+                                            tiktok_refresh.get("expires_in")
+                                            if tiktok_refresh.get("expires_in") is not None
+                                            else 0
+                                        )
+                                    ),
+                                    "tiktok_refresh_token_expire_at": datetime.now()
+                                    + timedelta(
+                                        seconds=(
+                                            tiktok_refresh.get("refresh_expires_in")
+                                            if tiktok_refresh.get("refresh_expires_in") is not None
+                                            else 0
+                                        )
+                                    ),
+                                }
+                            )
+
+                        tiktok_videos_request = post(
+                            f"{Config.TIKTOK_API_URL}/video/list/?fields=create_time,video_description,view_count,title,comment_count,embed_link,like_count,id,cover_image_url,share_count",
+                            headers={"Authorization": f"Bearer {user.tiktok_token}"},
                         )
 
-                    tiktok_videos_request = post(
-                        f"{Config.TIKTOK_API_URL}/video/list/?fields=create_time,video_description,view_count,title,comment_count,embed_link,like_count,id,cover_image_url,share_count",
-                        headers={"Authorization": f"Bearer {user.tiktok_token}"},
-                    )
+                        tiktok_videos = tiktok_videos_request.json().get("data").get("videos")
+                        if len(tiktok_videos) > 0:
+                            for tiktok_video in tiktok_videos:
+                                # kontrola, jestli náhodou příspěvek již neexistuje
+                                post_query = Posts.query.filter_by(platform_id=tiktok_video.get("id"))
 
-                    tiktok_videos = tiktok_videos_request.json()["data"]["videos"]
-                    if len(tiktok_videos) > 0:
-                        for tiktok_video in tiktok_videos:
-                            # kontrola, jestli náhodou příspěvek již neexistuje
-                            post_query = Posts.query.filter_by(platform_id=tiktok_video.get("id"))
-
-                            # pokud již existuje, tak pouze aktualizuji data
-                            if post_query.one_or_none():
-                                post_query.update(
-                                    {
-                                        "views": tiktok_video.get("view_count", None),
-                                        "likes": tiktok_video.get("like_count", None),
-                                        "comments": tiktok_video.get("comment_count", None),
-                                        "shares": tiktok_video.get("share_count", None),
-                                        "engagement_rate": (
-                                            0
-                                            if tiktok_video.get("view_count", None) == 0
-                                            or tiktok_video.get("view_count", None) == None
-                                            else (
-                                                (
-                                                    tiktok_video.get("like_count", 0)
-                                                    + tiktok_video.get("comment_count", 0)
-                                                    + tiktok_video.get("share_count", 0),
+                                # pokud již existuje, tak pouze aktualizuji data
+                                if post_query.one_or_none():
+                                    post_query.update(
+                                        {
+                                            "views": tiktok_video.get("view_count", None),
+                                            "likes": tiktok_video.get("like_count", None),
+                                            "comments": tiktok_video.get("comment_count", None),
+                                            "shares": tiktok_video.get("share_count", None),
+                                            "engagement_rate": (
+                                                0
+                                                if tiktok_video.get("view_count", None) == 0
+                                                or tiktok_video.get("view_count", None) is None
+                                                else (
+                                                    (
+                                                        tiktok_video.get("like_count", 0)
+                                                        + tiktok_video.get("comment_count", 0)
+                                                        + tiktok_video.get("share_count", 0),
+                                                    )
+                                                    / tiktok_video.get("view_count", None)
+                                                    * 100
                                                 )
-                                                / tiktok_video.get("view_count", None)
-                                                * 100
-                                            )
-                                        ),
-                                    }
-                                )
-                                continue
-
-                            # IG post = 1, IG story = 2, IG reel = 3, TT video = 4, FB post = _ (nevím)
-                            post_hashtags = set(re.findall(r"#(\w+)", tiktok_video.get("video_description")))
-                            campaign_hashtags = set(campaign.hashtags.split(","))
-
-                            if post_hashtags == campaign_hashtags:
-                                platform_type_id = 4
-                                db.session.add(
-                                    Posts(
-                                        platform_id=tiktok_video.get("id"),
-                                        platform_type_id=platform_type_id,
-                                        published_at=datetime.fromtimestamp(tiktok_video.get("create_time", None)),
-                                        media_url=tiktok_video.get("embed_link", None),
-                                        thumbnail_url=tiktok_video.get("cover_image_url", None),
-                                        views=tiktok_video.get("view_count", None),
-                                        likes=tiktok_video.get("like_count", None),
-                                        comments=tiktok_video.get("comment_count", None),
-                                        engagement_rate=(
-                                            0
-                                            if tiktok_video.get("view_count", None) == 0
-                                            or tiktok_video.get("view_count", None) == None
-                                            else (
-                                                (
-                                                    tiktok_video.get("like_count", 0)
-                                                    + tiktok_video.get("comment_count", 0)
-                                                    + tiktok_video.get("share_count", 0),
-                                                )
-                                                / tiktok_video.get("view_count", None)
-                                                * 100
-                                            )
-                                        ),
-                                        user_id=user.id,
-                                        campaign_id=campaign.id,
+                                            ),
+                                        }
                                     )
-                                )
+                                    continue
+
+                                # IG post = 1, IG story = 2, IG reel = 3, TT video = 4, FB post = _ (nevím)
+                                post_hashtags = set(re.findall(r"#(\w+)", tiktok_video.get("video_description")))
+                                campaign_hashtags = set(campaign.hashtags.split(","))
+
+                                if post_hashtags == campaign_hashtags:
+                                    platform_type_id = 4
+                                    db.session.add(
+                                        Posts(
+                                            platform_id=tiktok_video.get("id"),
+                                            platform_type_id=platform_type_id,
+                                            published_at=datetime.fromtimestamp(tiktok_video.get("create_time", None)),
+                                            media_url=tiktok_video.get("embed_link", None),
+                                            thumbnail_url=tiktok_video.get("cover_image_url", None),
+                                            views=tiktok_video.get("view_count", None),
+                                            likes=tiktok_video.get("like_count", None),
+                                            comments=tiktok_video.get("comment_count", None),
+                                            engagement_rate=(
+                                                0
+                                                if tiktok_video.get("view_count", None) == 0
+                                                or tiktok_video.get("view_count", None) is None
+                                                else (
+                                                    (
+                                                        tiktok_video.get("like_count", 0)
+                                                        + tiktok_video.get("comment_count", 0)
+                                                        + tiktok_video.get("share_count", 0),
+                                                    )
+                                                    / tiktok_video.get("view_count", None)
+                                                    * 100
+                                                )
+                                            ),
+                                            user_id=user.id,
+                                            campaign_id=campaign.id,
+                                        )
+                                    )
 
         db.session.commit()
 
@@ -451,4 +480,4 @@ def startup_actions(app_context):
 
     get_posts_metrics(app_context)
 
-    # get_profile_metrics(app_context)
+    get_profile_metrics(app_context)

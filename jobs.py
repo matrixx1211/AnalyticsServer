@@ -12,7 +12,6 @@ if Config.DEV:
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
     handler.setFormatter(logging.Formatter("%(asctime)s:%(levelname)s - %(message)s"))
-
     jobs_logger.addHandler(handler)
 
 
@@ -21,9 +20,7 @@ def every_24_hours(app_context):
 
     with app_context:
         # Dělám to stejné, co na začátku při spuštění
+        #   - vnitřně volá všechny akce potřebné pro zajištění dat k metrikám
         startup_actions(app_context)
 
-        # Vyřešit metriky účtu
-        # get_
-
-        # Vyřešit metriky příspěvků
+    jobs_logger.info(f"Ending job, that runs every 24 hours. Now: {datetime.now()}")

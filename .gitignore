@@ -143,6 +143,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.linux_venv
 
 # Spyder project settings
 .spyderproject
@@ -208,3 +209,10 @@ __marimo__/
 
 # DB
 *.db
+*.sqlite
+
+# Logs
+log.txt
+
+# OLD files
+OLD
