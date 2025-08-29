@@ -98,6 +98,8 @@ class Posts(db.Model):
     media_url: Mapped[Optional[str]] = mapped_column(Text)
     thumbnail_url: Mapped[Optional[str]] = mapped_column(Text)
 
+    media_type: Mapped[Optional[str]] = mapped_column(String(8))
+
     # analytická data o příspěvku
     views: Mapped[Optional[int]]
     likes: Mapped[Optional[int]]
@@ -125,6 +127,7 @@ class Posts(db.Model):
             # "hashtags": self.hashtags,
             "media_url": self.media_url,
             "thumbnail_url": self.thumbnail_url,
+            "media_type": self.media_type,
             "views": self.views,
             "likes": self.likes,
             "comments": self.comments,
@@ -144,6 +147,7 @@ class Posts(db.Model):
             "hashtags": self.hashtags,
             "media_url": self.media_url,
             "thumbnail_url": self.thumbnail_url,
+            "media_type": self.media_type,
             "views": self.views,
             "likes": self.likes,
             "shares": self.shares,

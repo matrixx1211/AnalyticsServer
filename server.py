@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from flask import Flask
 from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy import text
 
 from models import db
 from routes import api, dev
@@ -41,6 +42,18 @@ def create_app():
     flask_app_context = app.app_context()
     with flask_app_context:
         db.create_all()
+        # TODO: Jednorázové přidání MEDIA_TYPE
+        try:
+            db.session.execute(text("ALTER TABLE posts ADD COLUMN media_type VARCHAR(8)"))
+            db.session.commit()
+            print("Sloupec 'media_type' byl úspěšně přidán.")
+        except Exception as e:
+            # Zachyti chybu, pokud sloupec jiz existuje
+            if "duplicate column name" in str(e).lower():
+                print("Sloupec 'media_type' již existuje.")
+            else:
+                print(f"Chyba při přidávání sloupce: {e}")
+            db.session.rollback()  # V pripade jakekoliv jine chyby je lepsi rollback
 
     # Akce, které se provedou na začátku
     startup_actions(flask_app_context)

@@ -85,18 +85,32 @@ def get_tiktok_token():
 
 @api.route("/facebook/token", methods=["POST"])
 def get_facebook_token():
-    # získání tokenu z požadavku
+    # získání short lived tokenu z požadavku
     body = request.get_json()
 
-    # TODO: stejně jako u tiktoku viz. výš
-    # předtím, než vůbec začnu řešit uživatele, tak si uložím všechny existující
-    # save_all_users(current_app.app_context())
+    # získání long lived tokenu z FB
+    try:
+        long_lived_token_request = get(
+            f"{Config.META_API_URL}/oauth/access_token?grant_type=fb_exchange_token&client_id={Config.META_APP_ID}&client_secret={Config.META_APP_SECRET}&fb_exchange_token={body.get('meta_token')}"
+        ).json()
+
+        long_lived_token = long_lived_token_request.get("access_token", None)
+        long_lived_token_expires_in = long_lived_token_request.get("expires_in", 5184000)
+    except:
+        return (
+            jsonify(
+                {
+                    "error": "long_lived_token_retriev_failed",
+                    "error_description": "Failed to retrive long lived token from short lived token.",
+                }
+            )
+        ), 400
 
     # najití ostatních META (FB/IG) údajů a jejich příprava uložení
     # /facebook_user_id/accounts/?access_token=meta_token
     try:
         page_id_request = get(
-            f"{Config.META_API_URL}/{body.get('facebook_user_id')}/accounts/?access_token={body.get('meta_token')}"
+            f"{Config.META_API_URL}/{body.get('facebook_user_id')}/accounts/?access_token={long_lived_token}"
         )
         data_page_id = page_id_request.json()
     except:
@@ -114,7 +128,7 @@ def get_facebook_token():
     # /page_id[0].id?fields=instagram_business_account&access_token=meta_token
     try:
         ig_user_id_request = get(
-            f"{Config.META_API_URL}/{data_page_id['data'][0]['id']}/?fields=instagram_business_account,username&access_token={body.get('meta_token')}"
+            f"{Config.META_API_URL}/{data_page_id['data'][0]['id']}/?fields=instagram_business_account,username&access_token={long_lived_token}"
         )
         ig_user_id_data = ig_user_id_request.json()
     except:
@@ -132,8 +146,8 @@ def get_facebook_token():
     if not update_user(
         {
             "creators_email": body.get("email"),
-            "meta_token": body.get("meta_token"),
-            "meta_token_expire_at": datetime.now() + timedelta(seconds=body.get("meta_expires_in")),
+            "meta_token": long_lived_token,
+            "meta_token_expire_at": datetime.now() + timedelta(seconds=long_lived_token_expires_in),
             "meta_scopes": body.get("meta_scopes"),
             "facebook_user_id": body.get("facebook_user_id"),
             "facebook_page_id": data_page_id["data"][0]["id"],

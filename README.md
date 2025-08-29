@@ -46,3 +46,58 @@ Zajímají mě data z kampaní jen od začátku publishing, takže už znám ty 
 end publishing + 14 dnů budu řešit, pak campaing -> ended = true
 
 <!-- TODO: Dobrá věc je to, že nevím jaká je timezone na serveru, takže časy bude potřeba zkontrolovat -->
+
+ENDPOINT - PERMISSIONS
+USAGE
+
+1) META
+GET https://graph.facebook.com/v.23/<FACEBOOK_USER_ID>/accounts | pages_show_list
+
+* We use this endpoint to obtain <FACEBOOK_PAGE_ID> to obtain <IG_USER_ID>.
+
+GET https://graph.facebook.com/v.23/<FACEBOOK_PAGE_ID> | pages_read_engagement, pages_show_list
+
+* We use this endpoint to obtain <IG_USER_ID>. 
+* fields = instagram_business_account, username
+
+GET https://graph.facebook.com/v.23/<IG_USER_ID> | instagram_basic, pages_read_engagement, ads_read
+
+* We use this endpoint to obtain profile information and statistics in order to complete user profiles in our application and obtain metrics about users and their potential reach.
+* fields = followers_count, media_count, profile_picture_url
+
+GET https://graph.facebook.com/v.23/<IG_USER_ID> | instagram_basic, pages_show_list
+
+* We use this endpoint to retrieve media shared by the user and search for media whose description contains hashtags from campaigns the user has joined.
+* fields = business_discovery.username(<IG_USERNAME>){{followers_count,media_count,media{{like_count,comments_count,permalink,thumbnail_url,timestamp,view_count,media_product_type,caption}}}}
+
+GET https://graph.facebook.com/v.23/<IG_USER_ID>/stories | instagram_basic, pages_read_engagement, ads_read
+
+* We use this endpoint to retrieve stories shared by the user and search for stories whose description contains hashtags from campaigns the user has joined.
+* fields = id, permalink, media_type, timestamp, thumbnail_url, like_count, comments_count, caption
+
+GET https://graph.facebook.com/v.23/<IG_MEDIA_ID>/insights | instagram_basic, instagram_manage_insights, pages_read_engagement, ads_read
+
+* We use this endpoint to retrieve insights data about IG_MEDIA. 
+* fields = id,permalink,media_type,timestamp,thumbnail_url,like_count,comments_count
+* metric = impressions,reach,taps_forward,taps_back,exits,replies
+
+1) TikTok
+POST https://open.tiktokapis.com/v2/oauth/token/ | -
+
+* We use this endpoint to get a token or renew token.
+
+GET https://open.tiktokapis.com/v2/user/info/ | user.info.basic, user.info.profile, user.info.stats
+
+* We use this endpoint to obtain profile information and statistics in order to complete user profiles in our application and obtain metrics about users and their potential reach.
+* fields = open_id, avatar_url, display_name, profile_deep_link, username, follower_count, likes_count, video_count
+
+POST https://open.tiktokapis.com/v2/video/list/ | video.list
+
+* We use this endpoint to retrieve videos shared by the user and search for videos whose description contains hashtags from campaigns in which the user is signed up.
+* fields = id, create_time, cover_image_url, video_description, embed_link, like_count, comment_count, share_count, view_count
+
+## Co bude možná potřeba udělat
+
+Problém nejspíš bude to, jak se právě teď získávají data o profilech tzn. chci všechny možné věci.
+Problém může být v tom, že možná nebudu moct získat všechny údaje, ze kterých bych dostal všehny 
+analytická data.
